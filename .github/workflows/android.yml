@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Generate Gradle Wrapper and Build APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -25,34 +25,28 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.11.1"
-
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.11.1 --distribution-type bin
-
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
       - name: Verify Gradle wrapper
         run: ./gradlew --version
 
-      - name: Upload Gradle wrapper
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-wrapper
-          path: |
-            gradlew
-            gradlew.bat
-          if-no-files-found: error
-          retention-days: 14
+      - name: Clean project
+        run: ./gradlew clean --stacktrace --console=plain
+
+      - name: Compile Kotlin
+        run: |
+          ./gradlew :app:compileDebugKotlin \
+            --stacktrace \
+            --console=plain
 
       - name: Build debug APK
-        run: ./gradlew clean assembleDebug --info --stacktrace
+        run: |
+          ./gradlew :app:assembleDebug \
+            --stacktrace \
+            --console=plain
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: NovelAI-debug-apk
