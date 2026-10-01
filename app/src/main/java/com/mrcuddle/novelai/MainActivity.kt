@@ -42,7 +42,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
-private const val NOVEL_AI = "https://novelai.net/dashboard"
+private const val NOVEL_AI = "https://novelai.net/stories"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
