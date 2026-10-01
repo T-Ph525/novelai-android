@@ -3,6 +3,8 @@
     <application
         android:theme="@style/Theme.NovelAI"
         android:label="NovelAI"
+        android:icon="@drawable/novelai_icon"
+        android:roundIcon="@drawable/novelai_icon"
         android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
         android:allowBackup="true">

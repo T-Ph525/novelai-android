@@ -13,9 +13,14 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -37,7 +42,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -47,38 +54,41 @@ private const val NOVEL_AI = "https://novelai.net/"
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         setContent { NovelAIApp() }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun NovelAIApp() {
-    var showSettings by remember { mutableStateOf(false) }
     var webView by remember { mutableStateOf<WebView?>(null) }
+    val isInPreview = LocalInspectionMode.current
 
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Scaffold(
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text("NovelAI") },
-                    actions = {
-                        IconButton(onClick = { webView?.reload() }) {
-                            Icon(Icons.Default.Refresh, "Reload")
-                        }
-                        IconButton(onClick = { showSettings = true }) {
-                            Icon(Icons.Default.Settings, "Settings")
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize()) {
+            if (isInPreview) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("NovelAI WebView Placeholder (Preview Mode)")
+                }
+            } else {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { context ->
                         WebView(context).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
                             webView = this
                             configureNovelAIWebView(context, this)
                             loadUrl(NOVEL_AI)
@@ -87,19 +97,6 @@ private fun NovelAIApp() {
                 )
             }
         }
-
-        if (showSettings) {
-            AlertDialog(
-                onDismissRequest = { showSettings = false },
-                title = { Text("Settings") },
-                text = {
-                    Text("NovelAI is loaded in a secure, persistent WebView. Downloads are handled by Android.")
-                },
-                confirmButton = {
-                    TextButton(onClick = { showSettings = false }) { Text("Done") }
-                }
-            )
-        }
     }
 
     BackHandler(enabled = webView?.canGoBack() == true) {
@@ -107,31 +104,10 @@ private fun NovelAIApp() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Preview(showBackground = true)
 @Composable
 private fun NovelAIAppPreview() {
-    MaterialTheme(colorScheme = darkColorScheme()) {
-        Scaffold(
-            topBar = {
-                CenterAlignedTopAppBar(
-                    title = { Text("NovelAI") },
-                    actions = {
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Default.Refresh, "Reload")
-                        }
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Default.Settings, "Settings")
-                        }
-                    }
-                )
-            }
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                Text("NovelAI Preview Content", modifier = Modifier.padding(16.dp))
-            }
-        }
-    }
+    NovelAIApp()
 }
 
 @SuppressLint("SetJavaScriptEnabled")
