@@ -37,6 +37,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +50,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
-private const val NOVEL_AI = "https://novelai.net/"
+private const val NOVEL_AI = "https://novelai.net/dashboard"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,6 +70,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun NovelAIApp() {
     var webView by remember { mutableStateOf<WebView?>(null) }
+    // Observable state, kept in sync from WebViewClient so BackHandler reacts to history changes
+    var canGoBack by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
     val isInPreview = LocalInspectionMode.current
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -81,25 +85,39 @@ private fun NovelAIApp() {
                     Text("NovelAI WebView Placeholder (Preview Mode)")
                 }
             } else {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { context ->
-                        WebView(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            webView = this
-                            configureNovelAIWebView(context, this)
-                            loadUrl(NOVEL_AI)
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        isRefreshing = true
+                        webView?.reload()
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { context ->
+                            WebView(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                webView = this
+                                configureNovelAIWebView(
+                                    context,
+                                    this,
+                                    onHistoryChanged = { canGoBack = it },
+                                    onPageLoadFinished = { isRefreshing = false }
+                                )
+                                loadUrl(NOVEL_AI)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }
 
-    BackHandler(enabled = webView?.canGoBack() == true) {
+    BackHandler(enabled = canGoBack) {
         webView?.goBack()
     }
 }
@@ -111,7 +129,12 @@ private fun NovelAIAppPreview() {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun configureNovelAIWebView(context: Context, view: WebView) {
+private fun configureNovelAIWebView(
+    context: Context,
+    view: WebView,
+    onHistoryChanged: (Boolean) -> Unit,
+    onPageLoadFinished: () -> Unit
+) {
     with(view.settings) {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -139,6 +162,16 @@ private fun configureNovelAIWebView(context: Context, view: WebView) {
                 )
                 true
             }
+        }
+
+        // Fires on every navigation, including in-page history changes (SPA routes),
+        // so the back handler always knows the current history state.
+        override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
+            onHistoryChanged(v.canGoBack())
+        }
+
+        override fun onPageFinished(v: WebView, url: String?) {
+            onPageLoadFinished()
         }
     }
 
