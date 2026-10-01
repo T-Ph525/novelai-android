@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.MotionEvent
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
@@ -23,8 +24,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -38,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -107,6 +114,10 @@ private fun NovelAIApp() {
                                     view = this,
                                     onHistoryChanged = { canGoBack = it },
                                     onPageLoadFinished = { isRefreshing = false },
+                                    onPullToRefresh = {
+                                        isRefreshing = true
+                                        reload()
+                                    },
                                 ) { callback ->
                                     filePathCallback?.onReceiveValue(null)
                                     filePathCallback = callback
@@ -115,6 +126,18 @@ private fun NovelAIApp() {
                                 loadUrl(NOVEL_AI)
                             }
                         },
+                    )
+                }
+
+                SmallFloatingActionButton(
+                    onClick = { webView?.scrollTo(0, 0) },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(20.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowUp,
+                        contentDescription = "Scroll to top",
                     )
                 }
             }
@@ -138,6 +161,7 @@ private fun configureNovelAIWebView(
     view: WebView,
     onHistoryChanged: (Boolean) -> Unit,
     onPageLoadFinished: () -> Unit,
+    onPullToRefresh: () -> Unit,
     onShowFileChooserRequest: (ValueCallback<Array<Uri>>) -> Unit,
 ) {
     with(view.settings) {
@@ -154,6 +178,49 @@ private fun configureNovelAIWebView(
     CookieManager.getInstance().apply {
         setAcceptCookie(true)
         setAcceptThirdPartyCookies(view, true)
+    }
+
+    val refreshThreshold = 72 * context.resources.displayMetrics.density
+    var touchStartX = 0f
+    var touchStartY = 0f
+    var pullingToRefresh = false
+    view.setOnTouchListener { touchedView, event ->
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchStartX = event.x
+                touchStartY = event.y
+                pullingToRefresh = false
+                false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val deltaY = event.y - touchStartY
+                if (
+                    !pullingToRefresh && touchedView.scrollY == 0 &&
+                    deltaY > refreshThreshold &&
+                    kotlin.math.abs(event.x - touchStartX) < deltaY
+                ) {
+                    pullingToRefresh = true
+                    val cancelEvent = MotionEvent.obtain(event).apply {
+                        action = MotionEvent.ACTION_CANCEL
+                    }
+                    touchedView.onTouchEvent(cancelEvent)
+                    cancelEvent.recycle()
+                }
+                pullingToRefresh
+            }
+            MotionEvent.ACTION_UP -> {
+                val handled = pullingToRefresh
+                pullingToRefresh = false
+                if (handled) onPullToRefresh()
+                handled
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                val handled = pullingToRefresh
+                pullingToRefresh = false
+                handled
+            }
+            else -> pullingToRefresh
+        }
     }
 
     view.webViewClient = object : WebViewClient() {
@@ -178,6 +245,7 @@ private fun configureNovelAIWebView(
         }
 
         override fun onPageFinished(v: WebView, url: String?) {
+            onHistoryChanged(v.canGoBack())
             onPageLoadFinished()
         }
     }
