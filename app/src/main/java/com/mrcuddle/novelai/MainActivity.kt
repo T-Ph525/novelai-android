@@ -16,15 +16,29 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Web
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -37,6 +51,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun NovelAIApp() {
@@ -92,12 +107,38 @@ private fun NovelAIApp() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Preview(showBackground = true)
+@Composable
+private fun NovelAIAppPreview() {
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("NovelAI") },
+                    actions = {
+                        IconButton(onClick = {}) {
+                            Icon(Icons.Default.Refresh, "Reload")
+                        }
+                        IconButton(onClick = {}) {
+                            Icon(Icons.Default.Settings, "Settings")
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                Text("NovelAI Preview Content", modifier = Modifier.padding(16.dp))
+            }
+        }
+    }
+}
+
 @SuppressLint("SetJavaScriptEnabled")
 private fun configureNovelAIWebView(context: Context, view: WebView) {
     with(view.settings) {
         javaScriptEnabled = true
         domStorageEnabled = true
-        databaseEnabled = true
         loadsImagesAutomatically = true
         javaScriptCanOpenWindowsAutomatically = true
         setSupportMultipleWindows(true)
