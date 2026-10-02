@@ -20,7 +20,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -42,9 +41,6 @@ private const val NOVEL_AI = "https://novelai.net/stories"
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Edge-to-edge: draw behind system bars (enableEdgeToEdge needs a newer
-        // activity library than the CI runner has, so use the WindowCompat call)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent { NovelAIApp() }
     }
 }
