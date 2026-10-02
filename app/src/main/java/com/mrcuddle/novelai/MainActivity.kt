@@ -21,11 +21,16 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.compose.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -36,18 +41,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 
 private const val NOVEL_AI = "https://novelai.net/stories"
 
@@ -65,6 +75,25 @@ private fun NovelAIApp() {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(value = false) }
     val isInPreview = LocalInspectionMode.current
+
+    // Edge refresh handle: shows briefly, then auto-hides until you tap the right edge
+    var edgeButtonVisible by remember { mutableStateOf(true) }
+    var edgeButtonShowTick by remember { mutableStateOf(0) }
+    val edgeButtonAlpha by animateFloatAsState(
+        targetValue = if (edgeButtonVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "edgeButtonAlpha",
+    )
+
+    fun showEdgeButton() {
+        edgeButtonShowTick++
+        edgeButtonVisible = true
+    }
+
+    LaunchedEffect(edgeButtonShowTick) {
+        delay(4000)
+        edgeButtonVisible = false
+    }
 
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val filePickerLauncher = rememberLauncherForActivityResult(
@@ -98,6 +127,7 @@ private fun NovelAIApp() {
                                     context = context,
                                     view = this,
                                     onHistoryChanged = { canGoBack = it },
+                                    onLoadStarted = { showEdgeButton() },
                                 ) { callback ->
                                     filePathCallback?.onReceiveValue(null)
                                     filePathCallback = callback
@@ -108,16 +138,31 @@ private fun NovelAIApp() {
                         },
                     )
 
+                    // Invisible strip along the right edge: tap it to bring the handle back
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(24.dp)
+                            .height(96.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures { showEdgeButton() }
+                            },
+                    )
+
                     // Edge-style refresh handle: half-tucked into the right edge, vertically centered
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .offset(x = 24.dp)
                             .size(48.dp)
+                            .graphicsLayer { alpha = edgeButtonAlpha }
                             .shadow(6.dp, CircleShape)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer)
-                            .clickable { webView?.reload() },
+                            .clickable(enabled = edgeButtonVisible) {
+                                webView?.reload()
+                                showEdgeButton()
+                            },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -148,6 +193,7 @@ private fun configureNovelAIWebView(
     context: Context,
     view: WebView,
     onHistoryChanged: (Boolean) -> Unit,
+    onLoadStarted: () -> Unit,
     onShowFileChooserRequest: (ValueCallback<Array<Uri>>) -> Unit,
 ) {
     with(view.settings) {
@@ -185,6 +231,10 @@ private fun configureNovelAIWebView(
 
         override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
             onHistoryChanged(v.canGoBack())
+        }
+
+        override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+            onLoadStarted()
         }
 
     }
