@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -138,23 +137,24 @@ private fun NovelAIApp() {
                         },
                     )
 
-                    // Invisible strip along the right edge: tap it to bring the handle back
+                    // Invisible strip over NovelAI's blank top-bar center: tap it to bring the handle back
                     Box(
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .width(24.dp)
-                            .height(96.dp)
+                            .align(Alignment.TopCenter)
+                            .padding(top = 6.dp)
+                            .width(96.dp)
+                            .height(40.dp)
                             .pointerInput(Unit) {
                                 detectTapGestures { showEdgeButton() }
                             },
                     )
 
-                    // Edge-style refresh handle: half-tucked into the right edge, vertically centered
+                    // Refresh handle tucked into NovelAI's blank top-bar center
                     Box(
                         modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .offset(x = 24.dp)
-                            .size(48.dp)
+                            .align(Alignment.TopCenter)
+                            .padding(top = 6.dp)
+                            .size(40.dp)
                             .graphicsLayer { alpha = edgeButtonAlpha }
                             .shadow(6.dp, CircleShape)
                             .clip(CircleShape)
@@ -169,7 +169,7 @@ private fun NovelAIApp() {
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh page",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
                 }
