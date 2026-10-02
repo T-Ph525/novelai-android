@@ -23,11 +23,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,9 +44,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 
 private const val NOVEL_AI = "https://novelai.net/stories"
 
@@ -48,12 +51,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).let { controller ->
-            controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
         setContent { NovelAIApp() }
     }
 }
@@ -64,7 +61,6 @@ class MainActivity : ComponentActivity() {
 private fun NovelAIApp() {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var canGoBack by remember { mutableStateOf(value = false) }
-    var isRefreshing by remember { mutableStateOf(value = false) }
     val isInPreview = LocalInspectionMode.current
 
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -76,23 +72,32 @@ private fun NovelAIApp() {
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Box(Modifier.fillMaxSize()) {
-            if (isInPreview) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("NovelAI WebView Placeholder (Preview Mode)")
-                }
-            } else {
-                PullToRefreshBox(
-                    isRefreshing = isRefreshing,
-                    onRefresh = {
-                        isRefreshing = true
-                        webView?.reload()
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("NovelAI") },
+                    actions = {
+                        IconButton(
+                            onClick = { webView?.reload() },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh page",
+                            )
+                        }
                     },
-                    modifier = Modifier.fillMaxSize(),
-                ) {
+                )
+            },
+        ) { contentPadding ->
+            Box(Modifier.fillMaxSize().padding(contentPadding)) {
+                if (isInPreview) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("NovelAI WebView Placeholder (Preview Mode)")
+                    }
+                } else {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { context ->
@@ -106,7 +111,6 @@ private fun NovelAIApp() {
                                     context = context,
                                     view = this,
                                     onHistoryChanged = { canGoBack = it },
-                                    onPageLoadFinished = { isRefreshing = false },
                                 ) { callback ->
                                     filePathCallback?.onReceiveValue(null)
                                     filePathCallback = callback
@@ -137,7 +141,6 @@ private fun configureNovelAIWebView(
     context: Context,
     view: WebView,
     onHistoryChanged: (Boolean) -> Unit,
-    onPageLoadFinished: () -> Unit,
     onShowFileChooserRequest: (ValueCallback<Array<Uri>>) -> Unit,
 ) {
     with(view.settings) {
@@ -177,9 +180,6 @@ private fun configureNovelAIWebView(
             onHistoryChanged(v.canGoBack())
         }
 
-        override fun onPageFinished(v: WebView, url: String?) {
-            onPageLoadFinished()
-        }
     }
 
     view.webChromeClient = object : WebChromeClient() {
