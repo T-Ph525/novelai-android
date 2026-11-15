@@ -7,7 +7,7 @@
         android:roundIcon="@drawable/novelai_icon"
         android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
-        android:allowBackup="true">
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
