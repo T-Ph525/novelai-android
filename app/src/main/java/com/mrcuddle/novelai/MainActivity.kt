@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.URLUtil
-import android.webkit.WebViewDatabase
 import androidx.compose.runtime.DisposableEffect
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
@@ -32,7 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -201,7 +199,7 @@ private fun configureNovelAIWebView(
             if (Uri.parse(url).scheme == "https") {
                 val request = DownloadManager.Request(Uri.parse(url))
                     .setMimeType(mimeType)
-.setTitle(guessFilename(contentDisposition, mimeType))
+                    .setTitle(guessFilename(contentDisposition, mimeType))
                     .setDescription("Downloading from NovelAI")
                     .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
@@ -236,7 +234,7 @@ private fun guessFilename(contentDisposition: String?, mimeType: String?): Strin
     // Strip path separators and control characters from untrusted response headers.
     return (suggested.takeIf { it.isNotBlank() } ?: fallback)
         .substringAfterLast('/').substringAfterLast('\\')
-        .replace(Regex("""[\\x00-\\x1f\\x7f]"""), "_")
+        .replace(Regex("[\\x00-\\x1f\\x7f]"), "_")
         .take(120)
         .ifBlank { fallback }
 }
