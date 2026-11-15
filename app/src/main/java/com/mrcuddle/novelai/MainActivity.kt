@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.URLUtil
-import androidx.compose.runtime.DisposableEffect
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -62,18 +61,6 @@ private fun NovelAIApp() {
         filePathCallback = null
     }
 
-    DisposableEffect(webView) {
-        onDispose {
-            webView?.apply {
-                stopLoading()
-                webChromeClient = null
-                webViewClient = WebViewClient()
-                (parent as? ViewGroup)?.removeView(this)
-                destroy()
-            }
-        }
-    }
-
     MaterialTheme(colorScheme = darkColorScheme()) {
         Box(Modifier.fillMaxSize()) {
             if (isInPreview) {
@@ -105,6 +92,14 @@ private fun NovelAIApp() {
                                 }
                                 loadUrl(NOVEL_AI)
                             }
+                        },
+                        onRelease = { released ->
+                            released.stopLoading()
+                            released.webChromeClient = null
+                            released.webViewClient = WebViewClient()
+                            (released.parent as? ViewGroup)?.removeView(released)
+                            released.destroy()
+                            if (webView === released) webView = null
                         },
                     )
 
