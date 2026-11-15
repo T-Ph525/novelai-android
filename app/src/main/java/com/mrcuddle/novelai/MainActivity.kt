@@ -8,6 +8,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.view.ViewGroup
+import android.webkit.URLUtil
+import android.webkit.WebViewDatabase
+import androidx.compose.runtime.DisposableEffect
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -29,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +62,18 @@ private fun NovelAIApp() {
     ) { uris ->
         filePathCallback?.onReceiveValue(uris.toTypedArray())
         filePathCallback = null
+    }
+
+    DisposableEffect(webView) {
+        onDispose {
+            webView?.apply {
+                stopLoading()
+                webChromeClient = null
+                webViewClient = WebViewClient()
+                (parent as? ViewGroup)?.removeView(this)
+                destroy()
+            }
+        }
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -121,7 +137,12 @@ private fun configureNovelAIWebView(
         javaScriptEnabled = true
         domStorageEnabled = true
         loadsImagesAutomatically = true
-        javaScriptCanOpenWindowsAutomatically = true
+        javaScriptCanOpenWindowsAutomatically = false
+        allowFileAccess = false
+        allowContentAccess = true
+        allowFileAccessFromFileURLs = false
+        allowUniversalAccessFromFileURLs = false
+        safeBrowsingEnabled = true
         setSupportMultipleWindows(false)
         mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         cacheMode = WebSettings.LOAD_DEFAULT
@@ -130,24 +151,29 @@ private fun configureNovelAIWebView(
 
     CookieManager.getInstance().apply {
         setAcceptCookie(true)
-        setAcceptThirdPartyCookies(view, true)
+        setAcceptThirdPartyCookies(view, false)
     }
 
     view.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
             val url = request.url
-            val host = url.host.orEmpty()
-            return if (host.endsWith("novelai.net") || host.contains("novelai")) {
-                false
-            } else {
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, url)
-                    v.context.startActivity(intent)
-                } catch (_: Exception) {
-                    // Ignore if no activity can handle the external intent
-                }
-                true
+            val scheme = url.scheme?.lowercase()
+            val host = url.host?.lowercase().orEmpty()
+            // Only the actual NovelAI domain (and its subdomains) stays in the WebView.
+            // Avoid substring checks that would trust attacker-controlled lookalike hosts.
+            if (scheme == "https" && (host == "novelai.net" || host.endsWith(".novelai.net"))) {
+                return false
             }
+            if (scheme == "https" || scheme == "http" || scheme == "mailto" || scheme == "tel") {
+                try {
+                    v.context.startActivity(Intent(Intent.ACTION_VIEW, url).apply {
+                        addCategory(Intent.CATEGORY_BROWSABLE)
+                    })
+                } catch (_: Exception) {
+                    // No compatible external handler is installed.
+                }
+            }
+            return true
         }
 
         override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
@@ -172,10 +198,10 @@ private fun configureNovelAIWebView(
 
     view.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
         try {
-            if (url.startsWith("http://") || url.startsWith("https://")) {
+            if (Uri.parse(url).scheme == "https") {
                 val request = DownloadManager.Request(Uri.parse(url))
                     .setMimeType(mimeType)
-                    .setTitle("NovelAI download")
+.setTitle(guessFilename(contentDisposition, mimeType))
                     .setDescription("Downloading from NovelAI")
                     .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
@@ -200,11 +226,17 @@ private fun configureNovelAIWebView(
 }
 
 private fun guessFilename(contentDisposition: String?, mimeType: String?): String {
-    val match = Regex("""filename="?([^";]+)""").find(contentDisposition.orEmpty())
-    return match?.groupValues?.get(1) ?: when (mimeType) {
+    val suggested = URLUtil.guessFileName(null, contentDisposition, mimeType)
+    val fallback = when (mimeType) {
         "application/json" -> "novelai-export.json"
         "text/plain" -> "novelai-story.txt"
         "text/markdown" -> "novelai-story.md"
         else -> "novelai-download"
     }
+    // Strip path separators and control characters from untrusted response headers.
+    return (suggested.takeIf { it.isNotBlank() } ?: fallback)
+        .substringAfterLast('/').substringAfterLast('\\')
+        .replace(Regex("""[\\x00-\\x1f\\x7f]"""), "_")
+        .take(120)
+        .ifBlank { fallback }
 }
