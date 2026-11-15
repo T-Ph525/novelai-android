@@ -234,7 +234,7 @@ private fun guessFilename(contentDisposition: String?, mimeType: String?): Strin
     // Strip path separators and control characters from untrusted response headers.
     return (suggested.takeIf { it.isNotBlank() } ?: fallback)
         .substringAfterLast('/').substringAfterLast('\\')
-        .replace(Regex("[\\x00-\\x1f\\x7f]"), "_")
+        .replace(Regex("""[\\x00-\\x1f\\x7f]"""), "_")
         .take(120)
         .ifBlank { fallback }
 }
