@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
+import android.view.WindowManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
@@ -83,6 +87,7 @@ private fun NovelAIApp(startFresh: Boolean) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     val isPreview = LocalInspectionMode.current
+    var rendererGeneration by remember { mutableStateOf(0) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
@@ -103,12 +108,14 @@ private fun NovelAIApp(startFresh: Boolean) {
                 Text("NovelAI Android", Modifier.padding(16.dp))
             } else {
                 androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
+                    androidx.compose.runtime.key(rendererGeneration) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(-1, -1)
                                 webView = this
+                                isSaveEnabled = true
                                 with(settings) {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
@@ -121,6 +128,7 @@ private fun NovelAIApp(startFresh: Boolean) {
                                     allowUniversalAccessFromFileURLs = false
                                     mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                     safeBrowsingEnabled = true
+                                    cacheMode = WebSettings.LOAD_DEFAULT
                                 }
                                 CookieManager.getInstance().setAcceptCookie(true)
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
@@ -133,6 +141,14 @@ private fun NovelAIApp(startFresh: Boolean) {
                                                 ctx.startActivity(Intent(Intent.ACTION_VIEW, request.url).addCategory(Intent.CATEGORY_BROWSABLE))
                                             } catch (_: Exception) {}
                                         }
+                                        return true
+                                    }
+                                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                                        // Renderer is unusable. Compose releases it and creates a fresh WebView.
+                                        if (webView === view) webView = null
+                                        pageError = null
+                                        loading = true
+                                        rendererGeneration++
                                         return true
                                     }
                                     override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -169,6 +185,8 @@ private fun NovelAIApp(startFresh: Boolean) {
                                         if (Uri.parse(url).scheme != "https") return@setDownloadListener
                                         val name = URLUtil.guessFileName(url, disposition, mime)
                                             .substringAfterLast('/').substringAfterLast('\\')
+                                            .replace(Regex("[\\x00-\\x1f\\x7f]"), "_")
+                                            .take(120).ifBlank { "novelai-download" }
                                         val request = DownloadManager.Request(Uri.parse(url))
                                             .setTitle(name)
                                             .setMimeType(mime)
@@ -183,14 +201,15 @@ private fun NovelAIApp(startFresh: Boolean) {
                             }
                         },
                         onRelease = { released ->
-                            released.stopLoading()
+                            try { released.stopLoading() } catch (_: Exception) {}
                             released.webChromeClient = null
                             released.webViewClient = WebViewClient()
                             (released.parent as? ViewGroup)?.removeView(released)
-                            released.destroy()
+                            try { released.destroy() } catch (_: Exception) {}
                             if (webView === released) webView = null
                         }
                     )
+                    }
                     if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
                     pageError?.let { error ->
                         Column(
