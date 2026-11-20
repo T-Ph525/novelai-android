@@ -25,7 +25,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -35,12 +34,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.automirrored.filled.Redo
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -102,12 +95,7 @@ private fun NovelAIApp(startFresh: Boolean) {
     val initialUrl = remember {
         prefs.getString(LAST_URL, HOME).orEmpty().takeIf { !startFresh && trusted(it) } ?: HOME
     }
-    fun runEdit(command: String) {
-        // Best effort: web editors may intercept or reject execCommand.
-        if (command in setOf("undo", "redo", "selectAll", "copy", "paste")) {
-            webView?.evaluateJavascript("document.execCommand('$command', false, null);", null)
-        }
-    }
+
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         Column(Modifier.fillMaxSize()) {
@@ -214,22 +202,7 @@ private fun NovelAIApp(startFresh: Boolean) {
                         }
                     }
                 }
-                // Compact icon controls with accessible labels; WebView gets the remaining space.
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { runEdit("undo") }) {
-                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-                    }
-                    IconButton(onClick = { runEdit("redo") }) {
-                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
-                    }
-                    IconButton(onClick = { webView?.reload() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reload")
-                    }
-                }
+
             }
         }
         if (confirmExit) {
