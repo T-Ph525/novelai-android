@@ -4,12 +4,16 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Environment
 import android.view.ViewGroup
-import android.webkit.URLUtil
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -21,10 +25,20 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -33,64 +47,154 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
-private const val NOVEL_AI = "https://novelai.net/stories"
+private const val HOME = "https://novelai.net/stories"
+private const val PREFS = "novelai_local"
+private const val LAST_URL = "last_trusted_url"
+private const val DRAFT = "offline_scratchpad"
+
+private fun trusted(url: String): Boolean {
+    val uri = Uri.parse(url)
+    val host = uri.host?.lowercase() ?: return false
+    return uri.scheme == "https" && (host == "novelai.net" || host.endsWith(".novelai.net"))
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { NovelAIApp() }
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val shortcutManager = getSystemService(ShortcutManager::class.java)
+        val resume = ShortcutInfo.Builder(this, "resume")
+            .setShortLabel("Resume writing")
+            .setIcon(Icon.createWithResource(this, R.drawable.novelai_icon))
+            .setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+            .build()
+        val fresh = ShortcutInfo.Builder(this, "new")
+            .setShortLabel("Open NovelAI home")
+            .setIcon(Icon.createWithResource(this, R.drawable.novelai_icon))
+            .setIntent(Intent(this, MainActivity::class.java).setAction("com.mrcuddle.novelai.NEW_STORY"))
+            .build()
+        shortcutManager?.dynamicShortcuts = listOf(resume, fresh)
+        setContent { NovelAIApp(intent?.action == "com.mrcuddle.novelai.NEW_STORY") }
     }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun NovelAIApp() {
+private fun NovelAIApp(startFresh: Boolean) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    val isPreview = LocalInspectionMode.current
+    val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
     var webView by remember { mutableStateOf<WebView?>(null) }
-    var canGoBack by remember { mutableStateOf(value = false) }
-    val isInPreview = LocalInspectionMode.current
-
-    var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents(),
-    ) { uris ->
-        filePathCallback?.onReceiveValue(uris.toTypedArray())
-        filePathCallback = null
+    var loading by remember { mutableStateOf(true) }
+    var pageError by remember { mutableStateOf<String?>(null) }
+    var confirmExit by remember { mutableStateOf(false) }
+    var showDraft by remember { mutableStateOf(false) }
+    var draftText by remember { mutableStateOf(prefs.getString(DRAFT, "").orEmpty()) }
+    var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        fileCallback?.onReceiveValue(uris.toTypedArray())
+        fileCallback = null
+    }
+    val initialUrl = remember {
+        prefs.getString(LAST_URL, HOME).orEmpty().takeIf { !startFresh && trusted(it) } ?: HOME
+    }
+    fun runEdit(command: String) {
+        // Best effort: web editors may intercept or reject execCommand.
+        if (command in setOf("undo", "redo", "selectAll", "copy", "paste")) {
+            webView?.evaluateJavascript("document.execCommand('$command', false, null);", null)
+        }
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
-        Box(Modifier.fillMaxSize()) {
-            if (isInPreview) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("NovelAI WebView Placeholder (Preview Mode)")
-                }
+        Column(Modifier.fillMaxSize()) {
+            if (isPreview) {
+                Text("NovelAI Android", Modifier.padding(16.dp))
             } else {
-                Box(Modifier.fillMaxSize()) {
+                androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
-                        factory = { context ->
-                            WebView(context).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                )
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(-1, -1)
                                 webView = this
-                                configureNovelAIWebView(
-                                    context = context,
-                                    view = this,
-                                    onHistoryChanged = { canGoBack = it },
-                                ) { callback ->
-                                    filePathCallback?.onReceiveValue(null)
-                                    filePathCallback = callback
-                                    filePickerLauncher.launch("*/*")
+                                with(settings) {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    loadsImagesAutomatically = true
+                                    javaScriptCanOpenWindowsAutomatically = false
+                                    setSupportMultipleWindows(false)
+                                    allowFileAccess = false
+                                    allowContentAccess = true
+                                    allowFileAccessFromFileURLs = false
+                                    allowUniversalAccessFromFileURLs = false
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                    safeBrowsingEnabled = true
                                 }
-                                loadUrl(NOVEL_AI)
+                                CookieManager.getInstance().setAcceptCookie(true)
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                                        if (trusted(request.url.toString())) return false
+                                        val scheme = request.url.scheme
+                                        if (scheme in listOf("https", "http", "mailto", "tel")) {
+                                            try {
+                                                ctx.startActivity(Intent(Intent.ACTION_VIEW, request.url).addCategory(Intent.CATEGORY_BROWSABLE))
+                                            } catch (_: Exception) {}
+                                        }
+                                        return true
+                                    }
+                                    override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                                        loading = true
+                                        pageError = null
+                                    }
+                                    override fun onPageFinished(view: WebView, url: String) {
+                                        loading = false
+                                        if (trusted(url)) prefs.edit().putString(LAST_URL, url).apply()
+                                        CookieManager.getInstance().flush()
+                                    }
+                                    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+                                        if (request.isForMainFrame) {
+                                            loading = false
+                                            pageError = error.description?.toString() ?: "Page could not load"
+                                        }
+                                    }
+                                }
+                                webChromeClient = object : WebChromeClient() {
+                                    override fun onShowFileChooser(
+                                        webView: WebView?,
+                                        filePathCallback: ValueCallback<Array<Uri>>?,
+                                        fileChooserParams: FileChooserParams?
+                                    ): Boolean {
+                                        if (filePathCallback == null) return false
+                                        fileCallback?.onReceiveValue(null)
+                                        fileCallback = filePathCallback
+                                        filePicker.launch("*/*")
+                                        return true
+                                    }
+                                }
+                                setDownloadListener { url, agent, disposition, mime, _ ->
+                                    try {
+                                        if (Uri.parse(url).scheme != "https") return@setDownloadListener
+                                        val name = URLUtil.guessFileName(url, disposition, mime)
+                                            .substringAfterLast('/').substringAfterLast('\\')
+                                        val request = DownloadManager.Request(Uri.parse(url))
+                                            .setTitle(name)
+                                            .setMimeType(mime)
+                                            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                                            .addRequestHeader("User-Agent", agent)
+                                        CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+                                        (ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                                    } catch (_: Exception) {}
+                                }
+                                loadUrl(initialUrl)
                             }
                         },
                         onRelease = { released ->
@@ -100,136 +204,93 @@ private fun NovelAIApp() {
                             (released.parent as? ViewGroup)?.removeView(released)
                             released.destroy()
                             if (webView === released) webView = null
-                        },
+                        }
                     )
-
+                    if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    pageError?.let { error ->
+                        Column(
+                            Modifier.align(Alignment.Center).padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(error)
+                            Button(onClick = { pageError = null; webView?.reload() }) { Text("Retry") }
+                        }
+                    }
+                }
+                // Native controls remain compact in portrait to maximize editor space.
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = if (portrait) 2.dp else 0.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    TextButton(onClick = { runEdit("undo") }) { Text("Undo") }
+                    TextButton(onClick = { runEdit("redo") }) { Text("Redo") }
+                    if (!portrait) TextButton(onClick = { runEdit("selectAll") }) { Text("Select all") }
+                    TextButton(onClick = { showDraft = true }) { Text("Draft") }
+                    TextButton(onClick = { webView?.reload() }) { Text("Reload") }
                 }
             }
         }
-    }
-
-    BackHandler(enabled = canGoBack) {
-        webView?.goBack()
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun NovelAIAppPreview() {
-    NovelAIApp()
-}
-
-@SuppressLint("SetJavaScriptEnabled")
-private fun configureNovelAIWebView(
-    context: Context,
-    view: WebView,
-    onHistoryChanged: (Boolean) -> Unit,
-    onShowFileChooserRequest: (ValueCallback<Array<Uri>>) -> Unit,
-) {
-    with(view.settings) {
-        javaScriptEnabled = true
-        domStorageEnabled = true
-        loadsImagesAutomatically = true
-        javaScriptCanOpenWindowsAutomatically = false
-        allowFileAccess = false
-        allowContentAccess = true
-        allowFileAccessFromFileURLs = false
-        allowUniversalAccessFromFileURLs = false
-        safeBrowsingEnabled = true
-        setSupportMultipleWindows(false)
-        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        cacheMode = WebSettings.LOAD_DEFAULT
-        userAgentString = "$userAgentString NovelAI-Android/2.0"
-    }
-
-    CookieManager.getInstance().apply {
-        setAcceptCookie(true)
-        setAcceptThirdPartyCookies(view, false)
-    }
-
-    view.webViewClient = object : WebViewClient() {
-        override fun shouldOverrideUrlLoading(v: WebView, request: WebResourceRequest): Boolean {
-            val url = request.url
-            val scheme = url.scheme?.lowercase()
-            val host = url.host?.lowercase().orEmpty()
-            // Only the actual NovelAI domain (and its subdomains) stays in the WebView.
-            // Avoid substring checks that would trust attacker-controlled lookalike hosts.
-            if (scheme == "https" && (host == "novelai.net" || host.endsWith(".novelai.net"))) {
-                return false
-            }
-            if (scheme == "https" || scheme == "http" || scheme == "mailto" || scheme == "tel") {
-                try {
-                    v.context.startActivity(Intent(Intent.ACTION_VIEW, url).apply {
-                        addCategory(Intent.CATEGORY_BROWSABLE)
-                    })
-                } catch (_: Exception) {
-                    // No compatible external handler is installed.
+        if (showDraft) {
+            AlertDialog(
+                onDismissRequest = {
+                    prefs.edit().putString(DRAFT, draftText).apply()
+                    showDraft = false
+                },
+                title = { Text("Offline scratchpad") },
+                text = {
+                    Column {
+                        Text("Saved locally on this device. This does not automatically capture NovelAI's editor.")
+                        OutlinedTextField(
+                            value = draftText,
+                            onValueChange = {
+                                draftText = it
+                                prefs.edit().putString(DRAFT, it).apply()
+                            },
+                            label = { Text("Your draft") },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
+                            minLines = 5
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        prefs.edit().putString(DRAFT, draftText).apply()
+                        showDraft = false
+                    }) { Text("Done") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        draftText = ""
+                        prefs.edit().remove(DRAFT).apply()
+                    }) { Text("Clear") }
                 }
-            }
-            return true
+            )
         }
-
-        override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
-            onHistoryChanged(v.canGoBack())
-        }
-
-    }
-
-    view.webChromeClient = object : WebChromeClient() {
-        override fun onShowFileChooser(
-            webView: WebView?,
-            filePathCallback: ValueCallback<Array<Uri>>?,
-            fileChooserParams: FileChooserParams?,
-        ): Boolean {
-            if (filePathCallback != null) {
-                onShowFileChooserRequest(filePathCallback)
-                return true
-            }
-            return false
+        if (confirmExit) {
+            AlertDialog(
+                onDismissRequest = { confirmExit = false },
+                title = { Text("Leave NovelAI?") },
+                text = { Text("Make sure your work is saved before leaving.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmExit = false
+                        (context as? ComponentActivity)?.finish()
+                    }) { Text("Exit") }
+                },
+                dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Stay") } }
+            )
         }
     }
-
-    view.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-        try {
-            if (Uri.parse(url).scheme == "https") {
-                val request = DownloadManager.Request(Uri.parse(url))
-                    .setMimeType(mimeType)
-                    .setTitle(guessFilename(contentDisposition, mimeType))
-                    .setDescription("Downloading from NovelAI")
-                    .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
-                    )
-                    .addRequestHeader("User-Agent", userAgent)
-                    .setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS,
-                        guessFilename(contentDisposition, mimeType),
-                    )
-
-                CookieManager.getInstance().getCookie(url)?.let {
-                    request.addRequestHeader("Cookie", it)
-                }
-
-                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                manager.enqueue(request)
-            }
-        } catch (_: Exception) {
-            // Ignore download errors
+    BackHandler {
+        if (showDraft) {
+            prefs.edit().putString(DRAFT, draftText).apply()
+            showDraft = false
+        } else if (confirmExit) {
+            confirmExit = false
+        } else if (webView?.canGoBack() == true) {
+            webView?.goBack()
+        } else {
+            confirmExit = true
         }
     }
-}
-
-private fun guessFilename(contentDisposition: String?, mimeType: String?): String {
-    val suggested = URLUtil.guessFileName(null, contentDisposition, mimeType)
-    val fallback = when (mimeType) {
-        "application/json" -> "novelai-export.json"
-        "text/plain" -> "novelai-story.txt"
-        "text/markdown" -> "novelai-story.md"
-        else -> "novelai-download"
-    }
-    // Strip path separators and control characters from untrusted response headers.
-    return (suggested.takeIf { it.isNotBlank() } ?: fallback)
-        .substringAfterLast('/').substringAfterLast('\\')
-        .replace(Regex("""[\\x00-\\x1f\\x7f]"""), "_")
-        .take(120)
-        .ifBlank { fallback }
 }
