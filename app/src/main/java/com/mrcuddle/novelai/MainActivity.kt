@@ -4,9 +4,12 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.WebResourceError
+import android.view.WindowManager
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.drawable.Icon
@@ -25,18 +28,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -47,7 +46,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
@@ -56,7 +54,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 private const val HOME = "https://novelai.net/stories"
 private const val PREFS = "novelai_local"
 private const val LAST_URL = "last_trusted_url"
-private const val DRAFT = "offline_scratchpad"
 
 private fun trusted(url: String): Boolean {
     val uri = Uri.parse(url)
@@ -90,13 +87,11 @@ private fun NovelAIApp(startFresh: Boolean) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     val isPreview = LocalInspectionMode.current
-    val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+    var rendererGeneration by remember { mutableStateOf(0) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
-    var showDraft by remember { mutableStateOf(false) }
-    var draftText by remember { mutableStateOf(prefs.getString(DRAFT, "").orEmpty()) }
     var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileCallback?.onReceiveValue(uris.toTypedArray())
@@ -105,12 +100,7 @@ private fun NovelAIApp(startFresh: Boolean) {
     val initialUrl = remember {
         prefs.getString(LAST_URL, HOME).orEmpty().takeIf { !startFresh && trusted(it) } ?: HOME
     }
-    fun runEdit(command: String) {
-        // Best effort: web editors may intercept or reject execCommand.
-        if (command in setOf("undo", "redo", "selectAll", "copy", "paste")) {
-            webView?.evaluateJavascript("document.execCommand('$command', false, null);", null)
-        }
-    }
+
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         Column(Modifier.fillMaxSize()) {
@@ -118,12 +108,14 @@ private fun NovelAIApp(startFresh: Boolean) {
                 Text("NovelAI Android", Modifier.padding(16.dp))
             } else {
                 androidx.compose.foundation.layout.Box(Modifier.weight(1f).fillMaxWidth()) {
+                    androidx.compose.runtime.key(rendererGeneration) {
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(-1, -1)
                                 webView = this
+                                isSaveEnabled = true
                                 with(settings) {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
@@ -136,6 +128,7 @@ private fun NovelAIApp(startFresh: Boolean) {
                                     allowUniversalAccessFromFileURLs = false
                                     mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                     safeBrowsingEnabled = true
+                                    cacheMode = WebSettings.LOAD_DEFAULT
                                 }
                                 CookieManager.getInstance().setAcceptCookie(true)
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
@@ -148,6 +141,14 @@ private fun NovelAIApp(startFresh: Boolean) {
                                                 ctx.startActivity(Intent(Intent.ACTION_VIEW, request.url).addCategory(Intent.CATEGORY_BROWSABLE))
                                             } catch (_: Exception) {}
                                         }
+                                        return true
+                                    }
+                                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                                        // Renderer is unusable. Compose releases it and creates a fresh WebView.
+                                        if (webView === view) webView = null
+                                        pageError = null
+                                        loading = true
+                                        rendererGeneration++
                                         return true
                                     }
                                     override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -184,6 +185,8 @@ private fun NovelAIApp(startFresh: Boolean) {
                                         if (Uri.parse(url).scheme != "https") return@setDownloadListener
                                         val name = URLUtil.guessFileName(url, disposition, mime)
                                             .substringAfterLast('/').substringAfterLast('\\')
+                                            .replace(Regex("[\\x00-\\x1f\\x7f]"), "_")
+                                            .take(120).ifBlank { "novelai-download" }
                                         val request = DownloadManager.Request(Uri.parse(url))
                                             .setTitle(name)
                                             .setMimeType(mime)
@@ -198,14 +201,15 @@ private fun NovelAIApp(startFresh: Boolean) {
                             }
                         },
                         onRelease = { released ->
-                            released.stopLoading()
+                            try { released.stopLoading() } catch (_: Exception) {}
                             released.webChromeClient = null
                             released.webViewClient = WebViewClient()
                             (released.parent as? ViewGroup)?.removeView(released)
-                            released.destroy()
+                            try { released.destroy() } catch (_: Exception) {}
                             if (webView === released) webView = null
                         }
                     )
+                    }
                     if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
                     pageError?.let { error ->
                         Column(
@@ -217,54 +221,8 @@ private fun NovelAIApp(startFresh: Boolean) {
                         }
                     }
                 }
-                // Native controls remain compact in portrait to maximize editor space.
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = if (portrait) 2.dp else 0.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    TextButton(onClick = { runEdit("undo") }) { Text("Undo") }
-                    TextButton(onClick = { runEdit("redo") }) { Text("Redo") }
-                    if (!portrait) TextButton(onClick = { runEdit("selectAll") }) { Text("Select all") }
-                    TextButton(onClick = { showDraft = true }) { Text("Draft") }
-                    TextButton(onClick = { webView?.reload() }) { Text("Reload") }
-                }
+
             }
-        }
-        if (showDraft) {
-            AlertDialog(
-                onDismissRequest = {
-                    prefs.edit().putString(DRAFT, draftText).apply()
-                    showDraft = false
-                },
-                title = { Text("Offline scratchpad") },
-                text = {
-                    Column {
-                        Text("Saved locally on this device. This does not automatically capture NovelAI's editor.")
-                        OutlinedTextField(
-                            value = draftText,
-                            onValueChange = {
-                                draftText = it
-                                prefs.edit().putString(DRAFT, it).apply()
-                            },
-                            label = { Text("Your draft") },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
-                            minLines = 5
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        prefs.edit().putString(DRAFT, draftText).apply()
-                        showDraft = false
-                    }) { Text("Done") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        draftText = ""
-                        prefs.edit().remove(DRAFT).apply()
-                    }) { Text("Clear") }
-                }
-            )
         }
         if (confirmExit) {
             AlertDialog(
@@ -282,10 +240,7 @@ private fun NovelAIApp(startFresh: Boolean) {
         }
     }
     BackHandler {
-        if (showDraft) {
-            prefs.edit().putString(DRAFT, draftText).apply()
-            showDraft = false
-        } else if (confirmExit) {
+        if (confirmExit) {
             confirmExit = false
         } else if (webView?.canGoBack() == true) {
             webView?.goBack()
