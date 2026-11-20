@@ -29,12 +29,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,7 +77,6 @@ private fun NovelAIApp(startFresh: Boolean) {
     val isPreview = LocalInspectionMode.current
     val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
     var webView by remember { mutableStateOf<WebView?>(null) }
-    var canGoBack by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
@@ -144,7 +141,6 @@ private fun NovelAIApp(startFresh: Boolean) {
                                     }
                                     override fun onPageFinished(view: WebView, url: String) {
                                         loading = false
-                                        canGoBack = view.canGoBack()
                                         if (trusted(url)) prefs.edit().putString(LAST_URL, url).apply()
                                         CookieManager.getInstance().flush()
                                     }
@@ -153,15 +149,6 @@ private fun NovelAIApp(startFresh: Boolean) {
                                             loading = false
                                             pageError = error.description?.toString() ?: "Page could not load"
                                         }
-                                    }
-                                    override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
-                                        pageError = "WebView stopped responding. Restart the app to recover."
-                                        loading = false
-                                        // The renderer is gone: do not attempt to reuse the destroyed view.
-                                        return false
-                                    }
-                                    override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                                        canGoBack = view.canGoBack()
                                     }
                                 }
                                 webChromeClient = object : WebChromeClient() {
