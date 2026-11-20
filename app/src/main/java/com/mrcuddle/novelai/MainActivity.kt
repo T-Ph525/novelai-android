@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.content.pm.ShortcutInfo
@@ -25,20 +24,23 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,7 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
@@ -56,7 +57,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 private const val HOME = "https://novelai.net/stories"
 private const val PREFS = "novelai_local"
 private const val LAST_URL = "last_trusted_url"
-private const val DRAFT = "offline_scratchpad"
 
 private fun trusted(url: String): Boolean {
     val uri = Uri.parse(url)
@@ -90,13 +90,10 @@ private fun NovelAIApp(startFresh: Boolean) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     val isPreview = LocalInspectionMode.current
-    val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loading by remember { mutableStateOf(true) }
     var pageError by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
-    var showDraft by remember { mutableStateOf(false) }
-    var draftText by remember { mutableStateOf(prefs.getString(DRAFT, "").orEmpty()) }
     var fileCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileCallback?.onReceiveValue(uris.toTypedArray())
@@ -217,54 +214,23 @@ private fun NovelAIApp(startFresh: Boolean) {
                         }
                     }
                 }
-                // Native controls remain compact in portrait to maximize editor space.
+                // Compact icon controls with accessible labels; WebView gets the remaining space.
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = if (portrait) 2.dp else 0.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { runEdit("undo") }) { Text("Undo") }
-                    TextButton(onClick = { runEdit("redo") }) { Text("Redo") }
-                    if (!portrait) TextButton(onClick = { runEdit("selectAll") }) { Text("Select all") }
-                    TextButton(onClick = { showDraft = true }) { Text("Draft") }
-                    TextButton(onClick = { webView?.reload() }) { Text("Reload") }
+                    IconButton(onClick = { runEdit("undo") }) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
+                    IconButton(onClick = { runEdit("redo") }) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo")
+                    }
+                    IconButton(onClick = { webView?.reload() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Reload")
+                    }
                 }
             }
-        }
-        if (showDraft) {
-            AlertDialog(
-                onDismissRequest = {
-                    prefs.edit().putString(DRAFT, draftText).apply()
-                    showDraft = false
-                },
-                title = { Text("Offline scratchpad") },
-                text = {
-                    Column {
-                        Text("Saved locally on this device. This does not automatically capture NovelAI's editor.")
-                        OutlinedTextField(
-                            value = draftText,
-                            onValueChange = {
-                                draftText = it
-                                prefs.edit().putString(DRAFT, it).apply()
-                            },
-                            label = { Text("Your draft") },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 180.dp),
-                            minLines = 5
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        prefs.edit().putString(DRAFT, draftText).apply()
-                        showDraft = false
-                    }) { Text("Done") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        draftText = ""
-                        prefs.edit().remove(DRAFT).apply()
-                    }) { Text("Clear") }
-                }
-            )
         }
         if (confirmExit) {
             AlertDialog(
@@ -282,10 +248,7 @@ private fun NovelAIApp(startFresh: Boolean) {
         }
     }
     BackHandler {
-        if (showDraft) {
-            prefs.edit().putString(DRAFT, draftText).apply()
-            showDraft = false
-        } else if (confirmExit) {
+        if (confirmExit) {
             confirmExit = false
         } else if (webView?.canGoBack() == true) {
             webView?.goBack()
