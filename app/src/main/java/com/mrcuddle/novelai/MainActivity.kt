@@ -7,6 +7,9 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -65,6 +68,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val shortcutManager = getSystemService(ShortcutManager::class.java)
+        val resume = ShortcutInfo.Builder(this, "resume")
+            .setShortLabel("Resume writing")
+            .setIcon(Icon.createWithResource(this, R.drawable.novelai_icon))
+            .setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
+            .build()
+        val fresh = ShortcutInfo.Builder(this, "new")
+            .setShortLabel("Open NovelAI home")
+            .setIcon(Icon.createWithResource(this, R.drawable.novelai_icon))
+            .setIntent(Intent(this, MainActivity::class.java).setAction("com.mrcuddle.novelai.NEW_STORY"))
+            .build()
+        shortcutManager?.dynamicShortcuts = listOf(resume, fresh)
         setContent { NovelAIApp(intent?.action == "com.mrcuddle.novelai.NEW_STORY") }
     }
 }
